@@ -29,6 +29,10 @@ class DiscoveryError(Exception):
     pass
 
 
+class ForbiddenError(Exception):
+    pass
+
+
 # ------------------------------------------------------------------------------
 # API
 # ------------------------------------------------------------------------------
@@ -216,16 +220,26 @@ def discover(service_name, host=None, registrar=None, timeout=2):
         registrar = UDPRegistryClient(timeout=timeout)
     addrs = registrar.discover(service_name)
     if not addrs:
-        raise DiscoveryError("no servers exposing %r were found" % (service_name,))
+        raise DiscoveryError(f"no servers exposing {service_name!r} were found")
     if host:
         ips = socket.gethostbyname_ex(host)[2]
         addrs = [(h, p) for h, p in addrs if h in ips]
     if not addrs:
-        raise DiscoveryError("no servers exposing %r were found on %r" % (service_name, host))
+        raise DiscoveryError(f"no servers exposing {service_name} were found on {host}")
     return addrs
 
 
-def connect_by_service(service_name, host=None, service=VoidService, config={}):
+def list_services(registrar=None, timeout=2):
+    services = ()
+    if registrar is None:
+        registrar = UDPRegistryClient(timeout=timeout)
+    services = registrar.list()
+    if services is None:
+        raise ForbiddenError("Registry doesn't allow listing")
+    return services
+
+
+def connect_by_service(service_name, host=None, registrar=None, timeout=2, service=VoidService, config={}):
     """create a connection to an arbitrary server that exposes the requested service
 
     :param service_name: the service to discover
@@ -240,13 +254,13 @@ def connect_by_service(service_name, host=None, service=VoidService, config={}):
     # some of which could be dead. We iterate over the list returned and return the first
     # one we could connect to. If none of the registered servers is responsive we re-throw
     # the exception
-    addrs = discover(service_name, host=host)
+    addrs = discover(service_name, host=host, registrar=registrar, timeout=timeout)
     for host, port in addrs:
         try:
             return connect(host, port, service, config=config)
         except socket.error:
             pass
-    raise DiscoveryError("All services are down: %s" % (addrs,))
+    raise DiscoveryError(f"All services are down: {addrs}")
 
 
 def connect_subproc(args, service=VoidService, config={}):
